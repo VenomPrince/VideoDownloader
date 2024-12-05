@@ -1,0 +1,5 @@
+Flask==2.3.3
+yt-dlp==2023.7.6
+requests==2.31.0
+browser-cookie3==0.19.1
+tk==0.1.0

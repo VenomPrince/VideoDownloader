@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loader {
+            border-top-color: #3498db;
+            animation: spinner 1.5s linear infinite;
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-4xl font-bold text-center mb-8 text-gray-800">Video Downloader</h1>
+            
+            <!-- Settings Panel -->
+            <div id="settings-panel" class="hidden bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-xl font-semibold mb-4">Settings</h2>
+                <div class="flex flex-col gap-4">
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="download-dir">
+                            Download Directory
+                        </label>
+                        <div class="flex gap-2">
+                            <input type="text" id="download-dir" 
+                                   class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                   readonly>
+                            <button onclick="selectDirectory()" 
+                                    class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors">
+                                Browse
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- URL Input -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex flex-col md:flex-row gap-4">
+                    <input type="text" id="url-input" 
+                           class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                           placeholder="Enter video URL here...">
+                    <button onclick="getVideoInfo()" 
+                            class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                        Get Info
+                    </button>
+                </div>
+            </div>
+
+            <!-- Loading Spinner -->
+            <div id="loader" class="hidden">
+                <div class="flex justify-center items-center">
+                    <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12"></div>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="error-message" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6"></div>
+
+            <!-- Video Info -->
+            <div id="video-info" class="hidden bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex flex-col md:flex-row gap-6">
+                    <div class="md:w-1/3">
+                        <img id="video-thumbnail" class="w-full rounded-lg" src="" alt="Video thumbnail">
+                    </div>
+                    <div class="md:w-2/3">
+                        <h2 id="video-title" class="text-2xl font-bold mb-2"></h2>
+                        <p id="video-duration" class="text-gray-600 mb-4"></p>
+                        <div id="format-selector" class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2" for="format-select">
+                                Select Format:
+                            </label>
+                            <select id="format-select" class="w-full p-2 border rounded-lg">
+                            </select>
+                        </div>
+                        <button onclick="downloadVideo()" 
+                                class="bg-green-500 text-white px-6 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                            Download
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Download Progress -->
+            <div id="download-progress" class="hidden bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-semibold">Downloading...</span>
+                    <span id="progress-percentage" class="text-sm text-gray-500">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                    <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentVideoInfo = null;
+        let downloadDirectory = '';
+
+        async function selectDirectory() {
+            try {
+                const response = await fetch('/api/select_directory', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+
+                if (data.path) {
+                    downloadDirectory = data.path;
+                    document.getElementById('download-dir').value = data.path;
+                }
+            } catch (error) {
+                showError('Failed to select directory: ' + error.message);
+            }
+        }
+
+        function showLoader() {
+            document.getElementById('loader').classList.remove('hidden');
+            document.getElementById('video-info').classList.add('hidden');
+            document.getElementById('error-message').classList.add('hidden');
+        }
+
+        function hideLoader() {
+            document.getElementById('loader').classList.add('hidden');
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.innerHTML = `<p class="font-mono text-sm">${message}</p>`;
+            errorDiv.classList.remove('hidden');
+            hideLoader();
+            document.getElementById('download-progress').classList.add('hidden');
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0 || !bytes) return 'Unknown size';
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return 'Unknown duration';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return `${hours > 0 ? hours + ':' : ''}${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        async function getVideoInfo() {
+            const url = document.getElementById('url-input').value.trim();
+            if (!url) {
+                showError('Please enter a URL');
+                return;
+            }
+
+            showLoader();
+
+            try {
+                const response = await fetch('/api/info', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url }),
+                });
+
+                const data = await response.json();
+                hideLoader();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+
+                currentVideoInfo = data;
+                displayVideoInfo(data);
+            } catch (error) {
+                hideLoader();
+                showError('An error occurred while fetching video information');
+            }
+        }
+
+        function displayVideoInfo(info) {
+            const videoInfo = document.getElementById('video-info');
+            const thumbnail = document.getElementById('video-thumbnail');
+            const title = document.getElementById('video-title');
+            const duration = document.getElementById('video-duration');
+            const formatSelect = document.getElementById('format-select');
+
+            thumbnail.src = info.thumbnail || '';
+            title.textContent = info.title;
+            duration.textContent = formatDuration(info.duration);
+
+            // Clear and populate format selector
+            formatSelect.innerHTML = '';
+            info.formats.forEach(format => {
+                const option = document.createElement('option');
+                option.value = format.format_id;
+                option.textContent = format.description;
+                formatSelect.appendChild(option);
+            });
+
+            videoInfo.classList.remove('hidden');
+        }
+
+        async function downloadVideo() {
+            if (!currentVideoInfo) {
+                showError('No video information available');
+                return;
+            }
+
+            // Show settings panel to select download directory if not already set
+            if (!downloadDirectory) {
+                document.getElementById('settings-panel').classList.remove('hidden');
+                showError('Please select a download directory first');
+                return;
+            }
+
+            const formatId = document.getElementById('format-select').value;
+            const downloadProgress = document.getElementById('download-progress');
+            
+            try {
+                downloadProgress.classList.remove('hidden');
+                document.getElementById('error-message').classList.add('hidden');
+                
+                const response = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: currentVideoInfo.webpage_url,
+                        format_id: formatId,
+                        download_dir: downloadDirectory
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+
+                downloadProgress.classList.add('hidden');
+                alert('Download completed! File saved as: ' + data.filename);
+            } catch (error) {
+                showError('An error occurred while downloading the video: ' + error.message);
+            } finally {
+                downloadProgress.classList.add('hidden');
+            }
+        }
+
+        // Initialize by requesting the default download directory
+        fetch('/api/get_download_dir')
+            .then(response => response.json())
+            .then(data => {
+                if (data.path) {
+                    downloadDirectory = data.path;
+                    document.getElementById('download-dir').value = data.path;
+                }
+            })
+            .catch(error => console.error('Failed to get download directory:', error));
+    </script>
+</body>
+</html>
